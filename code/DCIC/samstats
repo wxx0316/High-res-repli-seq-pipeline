@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+INPUT=$1
+OUTPREFIX=$2
+OUTPUT=${OUTPREFIX}.samstats
+ 
+samtools stats $INPUT > $OUTPUT

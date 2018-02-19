@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+INPUT=$1  # bam file
+MEMPERTHREAD=$2  # default "5G"
+NTHREADS=$3  # default 1
+outdir=$4  # default "."
+outprefix=$5  # default "out"
+
+# check if file exists
+if [[ ! -f $INPUT ]]; then echo "file \"$INPUT\" not found"; exit 1; fi
+
+# default options
+if [ -z $MEMPERTHREAD ]; then
+  MEMPERTHREAD=5G
+fi
+
+if [ -z $NTHREADS ]; then
+  NTHREADS=1
+fi
+NEXTRATHREADS=$(echo "$NTHREADS - 1" | bc) 
+
+if [ -z $outdir ]; then
+  outdir=.
+fi
+
+if [ -z $outprefix ]; then
+  outprefix=out
+fi
+
+# output file name
+BASE=$outdir/$outprefix
+OUTPUT=${BASE}.q20_sort.bam
+FILTERED_BAM=${BASE}.q20.bam  # intermediate
+
+# run filter/sort command
+samtools view -bhq 20 $INPUT > $FILTERED_BAM
+samtools sort -m $MEMPERTHREAD --threads $NEXTRATHREADS -T $BASE $FILTERED_BAM > $OUTPUT
+

@@ -1,0 +1,20 @@
+#!/bin/bash
+f=$1
+outdir=$2  # default "."
+outprefix=$3  # default "out"
+
+if [ -z $outdir ]; then
+  outdir=.
+fi
+
+if [ -z $outprefix ]; then
+  outprefix=out
+fi
+
+ADAPTER=AGATCGGAAGAGCACACGTCTG
+
+OUTPUT=$outdir/$outprefix.clip.fastq
+LOGFILE=$OUTPUT.log
+
+cutadapt -a $ADAPTER -q 0 -O 1 -m 0 -o $OUTPUT $f > $LOGFILE
+

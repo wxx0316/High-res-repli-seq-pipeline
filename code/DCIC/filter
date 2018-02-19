@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+INPUT=$1  # .bg
+FILTERED_BED=$2
+OUTDIR=$3  # default "."
+OUTPREFIX=$4  # default "out"
+
+# default options
+if [ -z $OUTDIR ]; then
+  OUTDIR=.
+fi
+
+if [ -z $OUTPREFIX ]; then
+  OUTPREFIX=out
+fi
+
+# check input file
+if [[ ! -f $INPUT ]]; then >&2 echo "file \"$INPUT\" not found"; exit 1; fi
+if [[ ! -f $FILTERED_BED ]]; then >&2 echo "file \"$FILTERED_BED\" not found"; exit 1; fi
+
+# output file name  
+BASE=$OUTDIR/$OUTPREFIX
+OUTPUT="${BASE}.filtered.bg"
+  
+bedtools intersect -sorted -u -a $INPUT -b $FILTERED_BED > $OUTPUT

@@ -1,0 +1,74 @@
+#!/usr/bin/env r
+
+## load docopt package from CRAN
+suppressMessages(library(docopt))       # we need docopt (>= 0.3) as on CRAN
+
+## configuration for docopt
+doc <- "Usage: smooth [-l lspan] [-d outdir] [-p outprefix] [-h] BGFILE
+
+-l --lspan LSPAN            span size in bp [default: 300000]
+-d --dir OUTDIR             output directory
+-p --prefix OUTPREFIX       output prefix
+-h --help                   show this help text"
+
+## docopt parsing
+opt <- docopt(doc)
+bgfile <- opt$BGFILE
+lspan <- as.numeric(opt$lspan)
+outdir <- opt$dir
+outprefix <- opt$prefix
+
+if(length(bgfile)==0){
+  stop("BGFILE not provided")
+}
+
+removeext <- function( filenames ){
+	filenames<-as.character(filenames)
+	for(i in 1:length(filenames)){
+		namevector<-unlist(strsplit(filenames[i],"\\."))
+		filenames[i]<-paste(namevector[1:(length(namevector)-1)],collapse=".")
+	}
+	filenames
+}
+
+options(scipen=9999)
+
+if(lspan<1) stop("lspan must indicate distance in bp")
+	
+outname <- paste(outdir,"/",outprefix,".loess",lspan,".bg",sep="")
+
+dump <- function(bgfile){
+		curbg <- as.data.frame( read.table ( bgfile, header=FALSE, stringsAsFactors=FALSE ) )
+		chroms    <- unique(curbg[,1])
+		numchroms <- length(chroms)
+		all=split(curbg,curbg[,1])
+		
+		lscores<-lapply(1:numchroms,function(i){
+			
+			cur <- all[[i]]
+		        curchrom <- cur[1,1]
+			chromlspan <- lspan/(max(cur[,3])-min(cur[,2]))
+			
+			cura <- as.data.frame(lapply(4:ncol(cur), function(k){
+				cur[,k] <- tryCatch({
+						predict(loess(cur[,k]~cur[,2],span=chromlspan),cur[,2])
+					},warning = function(war){
+						out <- predict(loess(cur[,k]~cur[,2],span=chromlspan),cur[,2])
+						return(out)
+					},error = function(err){
+						return(cur[,k])
+					}
+				)
+			}))
+			
+			cura <- cbind(cur[,1:3],cura)
+			colnames(cura) <- colnames(cur)
+			return(cura)
+		})
+		smoothbg<-do.call(rbind,lscores)
+		write.table(smoothbg,file=outname,col.names=FALSE,quote=FALSE, sep="\t", row.names=FALSE)
+		rm(curbg)
+		gc()
+}
+
+dump(bgfile)

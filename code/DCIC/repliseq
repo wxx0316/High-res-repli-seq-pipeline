@@ -1,0 +1,161 @@
+#!/bin/bash
+
+usage() {
+  >&2 echo ""
+  >&2 echo "Usage (single-end): $(basename $0) [-t threads] [-w windowsize ] [-m minChromSize ] -i bwaIndex"
+  >&2 echo "  sample1_early.fastq [sample2_early.fastq sampleN_early.fastq] sample1_late.fastq [sample2_late.fastq sampleN_late.fastq]"
+  >&2 echo ""
+  >&2 echo ""
+  >&2 echo "Usage (paired-end): $(basename $0) -p [-t threads] [-w windowsize ] [-m minChromSize ] -i bwaIndex"
+  >&2 echo "  sample1_early_R1.fq sample1_early_R2.fq [sampleN_early_R1.fq sampleN_early_R2.fq] sample1_late_R1.fq sample1_late_R2.fq [sampleN_late_R1.fq sampleN_late_R2.fq]"
+  >&2 echo ""
+  >&2 echo "bwaIndex (-i) can be a path to a bwa index prefix or a tarball of an bwa index"
+  >&2 echo ""
+  exit 1
+}
+
+################################
+### PARSE COMMAND LINE ARGS ####
+################################
+
+while getopts ":i:t:m:w:r:p" opt; do
+  case $opt in
+  p)
+   PAIRARG="-p"
+   ;;
+  t)
+   THREADARG="-t $OPTARG"
+   ;;
+  w)
+   WINARG="-w $OPTARG"
+   ;;
+  i)
+   INDEXFILE=$OPTARG
+   ;;
+  m)
+   MEMARG="-m $OPTARG"
+   ;;
+  r)
+   REFARG="-r $OPTARG"
+   ;;
+  \?)
+   echo "Invalid option: -$OPTARG" >&2
+   usage
+   ;;
+  [?])
+   usage
+   ;;
+  :)
+   echo "Option -$OPTARG requires an argument." >&2
+   echo "" >&2
+   usage
+   ;;
+  esac
+done
+
+shift $((OPTIND-1))
+
+if [[ -z $INDEXFILE ]]; then
+  >&2 echo "must define an fasta or bwa index with -i"
+fi
+
+if [[ $# -lt 2 ]] ; then
+  >&2 echo 'no (or not enough) fastq files specified'
+  exit 1
+fi
+
+
+#check that dependencies are in PATH and correct versions
+#check if chromsizes or fasta specified with -g
+#check input files (and number of input files is even)
+#print table of E/L R1/R2 for 10 seconds to let user check inputs
+
+if [[ -z $@ ]]; then
+  INPUT=$(cat /dev/stdin)
+else
+  INPUT=$@
+fi
+
+  #todo: make sure length of EARLYBGS and LATEBGS is even
+  #todo: check to see if read names in r1 and r2 are identical
+  
+NUMFILES=$(echo $INPUT | awk '{print NF}')
+
+if [ $((NUMFILES%2)) -ne 0 ]; then
+  >&2 echo "ERROR: number of files must be even, see usage:
+  usage
+fi
+
+NUMPAIRS=$(echo "${NUMFILES}/2" | bc)
+NSP1=$(echo "${NUMPAIRS}+1" | bc)
+   
+E=$(echo $INPUT | cut -d' ' -f 1-$NUMPAIRS)
+L=$(echo $INPUT | cut -d' ' -f ${NSP1}-${NUMFILES})
+   
+if [[ ! -z $PAIRARG ]]; then
+  ER1=$(echo $E | tr ' ' '\n' | paste - - | cut -f 1 | tr '\n' ',' | sed 's/,$//g')
+  ER2=$(echo $E | tr ' ' '\n' | paste - - | cut -f 2 | tr '\n' ',' | sed 's/,$//g')
+  LR1=$(echo $L | tr ' ' '\n' | paste - - | cut -f 1 | tr '\n' ',' | sed 's/,$//g')
+  LR2=$(echo $L | tr ' ' '\n' | paste - - | cut -f 2 | tr '\n' ',' | sed 's/,$//g')
+  E=$(interleave $ER1 $ER2)
+  L=$(interleave $LR1 $LR2)
+fi  
+#  >&2 echo "paired-end not supported yet"
+#  exit 1
+#   ER1=$(echo $ER1 | tr ' ' ',')
+#   ER2=$(echo $ER2 | tr ' ' ',')
+#   LR1=$(echo $LR1 | tr ' ' ',')
+#   LR2=$(echo $LR2 | tr ' ' ',')
+
+#   E=$(interleave -t $NTHREADS $ER1 $ER2)
+#   L=$(interleave -t $NTHREADS $LR1 $LR2)
+#else
+#   ER2=$(echo $EF | tr ',' '\n' | paste - - | cut -f 2 | tr '\n' ',' | sed 's/,$//g')
+#   LR1=$(echo $LF | tr ',' '\n' | paste - - | cut -f 1 | tr '\n' ',' | sed 's/,$//g')
+#   LR2=$(echo $LF | tr ',' '\n' | paste - - | cut -f 2 | tr '\n' ',' | sed 's/,$//g')
+#   E=$(echo $EF | tr ',' ' ')
+#   L=$(echo $LF | tr ',' ' ')
+# fi
+
+# prepare index
+index=$(index $INDEXFILE)
+
+# clip adapters from reads
+cfq=$(clip $E $L)
+
+# align reads to genome
+bam=$(align -i $PAIRARG $THREADARG -i $index $cfq)
+
+# filter bams by alignment quality and sort by position
+sbam=$(filtersort $bam)
+
+# remove duplicate reads
+rbam=$(dedup $sbam)
+
+# calculate RPKM bedGraphs for each set of alignments
+bg=$(count $rbam)
+
+# filter windows with a low average RPKM
+fbg=$(filter $bg)
+
+# calculate log2 ratios between early and late
+l2r=$(log2ratio $fbg)
+
+# quantile-normalize replication timing profiles to the example reference bedGraph
+l2rn=$(normalize $l2r)
+
+# loess-smooth profiles using a 300kb span size
+l2rs=$(smooth $l2rn)
+
+fastqc -t 12 -q --extract -o fastqc $E $L $cfq
+bamstats=$(samstats $bam)
+# todo: plot rt histograms pre- and post-normalization
+# todo: plot bg histograms pre- and post-filter
+
+organize
+
+multiqc -f .
+
+
+
+
